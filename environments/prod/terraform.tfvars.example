@@ -1,0 +1,176 @@
+# environments/prod/terraform.tfvars.example
+# Copiar como terraform.tfvars y completar los valores reales.
+# NUNCA subir terraform.tfvars a Git.
+
+# --- Red --------------------------------------------------------------------
+vpc_cidr             = "10.0.0.0/16"
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_cidrs = ["10.0.11.0/24", "10.0.12.0/24"]
+
+# --- RDS existente ----------------------------------------------------------
+rds_security_group_id = "sg-xxxxxxxxxxxxxxxxx"
+
+# --- ACM --------------------------------------------------------------------
+acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# --- Dominios ---------------------------------------------------------------
+api_domain   = "api.mango.com"
+admin_domain = "admin.mango.com"
+
+# CIDRs para restringir mango-admin (dejar vacío para acceso público):
+# admin_allowed_cidrs = ["203.0.113.10/32", "203.0.113.20/32"]
+admin_allowed_cidrs = []
+
+# --- Contenedor -------------------------------------------------------------
+api_container_port      = 80
+admin_container_port    = 80
+api_health_check_path   = "/health"
+admin_health_check_path = "/health"
+image_tag               = "latest"
+
+# --- SQS --------------------------------------------------------------------
+create_sqs_queues = true
+
+# --- Variables de entorno ---------------------------------------------------
+api_environment_vars = [
+  { name = "APP_ENV",  value = "production" },
+  { name = "APP_PORT", value = "80" },
+  { name = "QUEUE_CONNECTION", value = "sqs" },
+]
+
+# Secrets desde SSM Parameter Store:
+api_secrets = [
+  { name = "APP_KEY",       valueFrom = "arn:aws:ssm:us-east-1:123456789012:parameter/mango/prod/api/APP_KEY" },
+  { name = "DB_PASSWORD",   valueFrom = "arn:aws:ssm:us-east-1:123456789012:parameter/mango/prod/api/DB_PASSWORD" },
+]
+
+admin_environment_vars = [
+  { name = "APP_ENV",  value = "production" },
+  { name = "APP_PORT", value = "80" },
+  { name = "QUEUE_CONNECTION", value = "sqs" },
+]
+
+admin_secrets = [
+  { name = "APP_KEY",       valueFrom = "arn:aws:ssm:us-east-1:123456789012:parameter/mango/prod/admin/APP_KEY" },
+  { name = "DB_PASSWORD",   valueFrom = "arn:aws:ssm:us-east-1:123456789012:parameter/mango/prod/admin/DB_PASSWORD" },
+]
+
+
+//TASK AUTOMATIZADAS:
+task_definitions = {
+
+  "mango-api" = {
+    cpu               = 512
+    memory            = 1024
+    ecr_url           = "123456789.dkr.ecr.us-east-1.amazonaws.com/mango-mango-api"
+    port              = 80
+    health_check_path = "/health"
+    environment_vars  = [{ name = "APP_ENV", value = "production" }]
+    secrets           = [{ name = "APP_KEY", valueFrom = "arn:aws:ssm:..." }]
+  }
+
+  "mango-admin" = {
+    cpu               = 512
+    memory            = 1024
+    ecr_url           = "123456789.dkr.ecr.us-east-1.amazonaws.com/mango-mango-admin"
+    port              = 80
+    health_check_path = "/health"
+    environment_vars  = [{ name = "APP_ENV", value = "production" }]
+    secrets           = [{ name = "APP_KEY", valueFrom = "arn:aws:ssm:..." }]
+  }
+
+  "mango-api-worker" = {
+    cpu           = 256
+    memory        = 512
+    ecr_url       = "123456789.dkr.ecr.us-east-1.amazonaws.com/mango-mango-api"
+    command       = ["php", "artisan", "queue:work", "sqs", "--sleep=3", "--tries=3", "--timeout=90"]
+    sqs_queue_url = "https://sqs.us-east-1.amazonaws.com/123456789/mango-prod-mango-api-jobs"
+    environment_vars = [{ name = "APP_ENV", value = "production" }]
+    secrets          = [{ name = "APP_KEY", valueFrom = "arn:aws:ssm:..." }]
+  }
+
+  "mango-admin-worker" = {
+    cpu           = 256
+    memory        = 512
+    ecr_url       = "123456789.dkr.ecr.us-east-1.amazonaws.com/mango-mango-admin"
+    command       = ["php", "artisan", "queue:work", "sqs", "--sleep=3", "--tries=3", "--timeout=90"]
+    sqs_queue_url = "https://sqs.us-east-1.amazonaws.com/123456789/mango-prod-mango-admin-jobs"
+    environment_vars = [{ name = "APP_ENV", value = "production" }]
+    secrets          = [{ name = "APP_KEY", valueFrom = "arn:aws:ssm:..." }]
+  }
+
+  "mango-cron" = {
+    cpu     = 256
+    memory  = 512
+    ecr_url = "123456789.dkr.ecr.us-east-1.amazonaws.com/mango-mango-admin"
+    command = ["php", "artisan", "schedule:run", "--verbose", "--no-interaction"]
+    environment_vars = [{ name = "APP_ENV", value = "production" }]
+    secrets          = [{ name = "APP_KEY", valueFrom = "arn:aws:ssm:..." }]
+  }
+
+  # Para agregar una nueva task en el futuro, solo agregar un bloque aquí:
+  # "mango-nueva-task" = {
+  #   cpu     = 256
+  #   memory  = 512
+  #   ecr_url = "..."
+  #   command = ["php", "artisan", "nueva:task"]
+  # }
+}task_definitions = {
+
+  "mango-api" = {
+    cpu               = 512
+    memory            = 1024
+    ecr_url           = "123456789.dkr.ecr.us-east-1.amazonaws.com/mango-mango-api"
+    port              = 80
+    health_check_path = "/health"
+    environment_vars  = [{ name = "APP_ENV", value = "production" }]
+    secrets           = [{ name = "APP_KEY", valueFrom = "arn:aws:ssm:..." }]
+  }
+
+  "mango-admin" = {
+    cpu               = 512
+    memory            = 1024
+    ecr_url           = "123456789.dkr.ecr.us-east-1.amazonaws.com/mango-mango-admin"
+    port              = 80
+    health_check_path = "/health"
+    environment_vars  = [{ name = "APP_ENV", value = "production" }]
+    secrets           = [{ name = "APP_KEY", valueFrom = "arn:aws:ssm:..." }]
+  }
+
+  "mango-api-worker" = {
+    cpu           = 256
+    memory        = 512
+    ecr_url       = "123456789.dkr.ecr.us-east-1.amazonaws.com/mango-mango-api"
+    command       = ["php", "artisan", "queue:work", "sqs", "--sleep=3", "--tries=3", "--timeout=90"]
+    sqs_queue_url = "https://sqs.us-east-1.amazonaws.com/123456789/mango-prod-mango-api-jobs"
+    environment_vars = [{ name = "APP_ENV", value = "production" }]
+    secrets          = [{ name = "APP_KEY", valueFrom = "arn:aws:ssm:..." }]
+  }
+
+  "mango-admin-worker" = {
+    cpu           = 256
+    memory        = 512
+    ecr_url       = "123456789.dkr.ecr.us-east-1.amazonaws.com/mango-mango-admin"
+    command       = ["php", "artisan", "queue:work", "sqs", "--sleep=3", "--tries=3", "--timeout=90"]
+    sqs_queue_url = "https://sqs.us-east-1.amazonaws.com/123456789/mango-prod-mango-admin-jobs"
+    environment_vars = [{ name = "APP_ENV", value = "production" }]
+    secrets          = [{ name = "APP_KEY", valueFrom = "arn:aws:ssm:..." }]
+  }
+
+  "mango-cron" = {
+    cpu     = 256
+    memory  = 512
+    ecr_url = "123456789.dkr.ecr.us-east-1.amazonaws.com/mango-mango-admin"
+    command = ["php", "artisan", "schedule:run", "--verbose", "--no-interaction"]
+    environment_vars = [{ name = "APP_ENV", value = "production" }]
+    secrets          = [{ name = "APP_KEY", valueFrom = "arn:aws:ssm:..." }]
+  }
+
+  # Para agregar una nueva task en el futuro, solo agregar un bloque aquí:
+  # "mango-nueva-task" = {
+  #   cpu     = 256
+  #   memory  = 512
+  #   ecr_url = "..."
+  #   command = ["php", "artisan", "nueva:task"]
+  # }
+}
