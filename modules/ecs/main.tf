@@ -7,9 +7,112 @@
 #   4. mango-admin-worker→ Service sin ALB, 1 tarea fija, consume SQS
 #   5. cron-task         → Solo Task Definition, disparada por EventBridge
 # =============================================================================
-
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
+
+## 
+# SG de mango-api tasks
+# Solo acepta tráfico del ALB en el puerto del contenedor
+resource "aws_security_group" "ecs_api" {
+  name        = "${var.name_prefix}-sg-ecs-api"
+  description = "mango-api Fargate tasks: solo tráfico desde ALB"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description     = "Desde ALB"
+    from_port       = var.api_container_port
+    to_port         = var.api_container_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  egress {
+    description = "Salida irrestricta (ECR, SQS, CloudWatch, RDS)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  lifecycle { create_before_destroy = true }
+}
+
+# --- SG de mango-admin tasks ------------------------------------------------
+# Si admin_allowed_cidrs está vacío → acepta del ALB sin filtro extra.
+# Si tiene IPs → el ALB ya filtra en su propio SG.
+resource "aws_security_group" "ecs_admin" {
+  name        = "${var.name_prefix}-sg-ecs-admin"
+  description = "mango-admin Fargate tasks: solo tráfico desde ALB"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description     = "Desde ALB"
+    from_port       = var.admin_container_port
+    to_port         = var.admin_container_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  lifecycle { create_before_destroy = true }
+}
+
+# --- SG de Workers (api-worker, admin-worker, cron) -------------------------
+# Sin ingress (no exponen puertos). Solo egreso para SQS, ECR, CloudWatch.
+resource "aws_security_group" "ecs_workers" {
+  name        = "${var.name_prefix}-sg-ecs-workers"
+  description = "Workers y cron tasks: sin ingress, solo egreso"
+  vpc_id      = var.vpc_id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  lifecycle { create_before_destroy = true }
+}
+
+
+# --- Regla en el SG de RDS existente ----------------------------------------
+# Permite que las tasks ECS accedan a la RDS ya creada.
+# Se agrega como regla al SG existente pasado como variable.
+resource "aws_security_group_rule" "rds_from_ecs_api" {
+  type                     = "ingress"
+  from_port                = 5432 
+  to_port                  = 5432
+  protocol                 = "tcp"
+  security_group_id        = var.rds_security_group_id
+  source_security_group_id = aws_security_group.ecs_api.id
+  description              = "mango-api tasks → RDS"
+}
+
+resource "aws_security_group_rule" "rds_from_ecs_admin" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  security_group_id        = var.rds_security_group_id
+  source_security_group_id = aws_security_group.ecs_admin.id
+  description              = "mango-admin tasks → RDS"
+}
+
+resource "aws_security_group_rule" "rds_from_ecs_workers" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  security_group_id        = var.rds_security_group_id
+  source_security_group_id = aws_security_group.ecs_workers.id
+  description              = "Workers y cron → RDS"
+}
 
 # =============================================================================
 # IAM — Roles con mínimo privilegio
@@ -238,7 +341,7 @@ resource "aws_ecs_service" "api" {
   enable_execute_command            = true
 
   network_configuration {
-    security_groups  = [var.ecs_api_sg_id]
+    security_groups  = [aws_security_group.ecs_api.id]
     subnets          = var.private_subnet_ids
     assign_public_ip = false
   }
@@ -275,7 +378,7 @@ resource "aws_ecs_service" "admin" {
   enable_execute_command            = true
 
   network_configuration {
-    security_groups  = [var.ecs_admin_sg_id]
+    security_groups  = [aws_security_group.ecs_api.id]
     subnets          = var.private_subnet_ids
     assign_public_ip = false
   }
@@ -311,7 +414,7 @@ resource "aws_ecs_service" "api_worker" {
   enable_execute_command = true
 
   network_configuration {
-    security_groups  = [var.ecs_workers_sg_id]
+    security_groups  = [aws_security_group.ecs_api.id]
     subnets          = var.private_subnet_ids
     assign_public_ip = false
   }
@@ -338,7 +441,7 @@ resource "aws_ecs_service" "admin_worker" {
   enable_execute_command = true
 
   network_configuration {
-    security_groups  = [var.ecs_workers_sg_id]
+    security_groups  = [aws_security_group.ecs_api.id]
     subnets          = var.private_subnet_ids
     assign_public_ip = false
   }
@@ -412,7 +515,7 @@ resource "aws_scheduler_schedule" "cron" {
 
       network_configuration {
         assign_public_ip = false
-        security_groups  = [var.ecs_workers_sg_id]
+        security_groups  = [vaws_security_group.ecs_api.id]
         subnets          = var.private_subnet_ids
       }
     }
@@ -426,106 +529,3 @@ resource "aws_scheduler_schedule" "cron" {
 
 }
 
-## 
-# SG de mango-api tasks
-# Solo acepta tráfico del ALB en el puerto del contenedor
-resource "aws_security_group" "ecs_api" {
-  name        = "${var.name_prefix}-sg-ecs-api"
-  description = "mango-api Fargate tasks: solo tráfico desde ALB"
-  vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "Desde ALB"
-    from_port       = var.api_container_port
-    to_port         = var.api_container_port
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-  }
-
-  egress {
-    description = "Salida irrestricta (ECR, SQS, CloudWatch, RDS)"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  lifecycle { create_before_destroy = true }
-}
-
-# --- SG de mango-admin tasks ------------------------------------------------
-# Si admin_allowed_cidrs está vacío → acepta del ALB sin filtro extra.
-# Si tiene IPs → el ALB ya filtra en su propio SG.
-resource "aws_security_group" "ecs_admin" {
-  name        = "${var.name_prefix}-sg-ecs-admin"
-  description = "mango-admin Fargate tasks: solo tráfico desde ALB"
-  vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "Desde ALB"
-    from_port       = var.admin_container_port
-    to_port         = var.admin_container_port
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  lifecycle { create_before_destroy = true }
-}
-
-# --- SG de Workers (api-worker, admin-worker, cron) -------------------------
-# Sin ingress (no exponen puertos). Solo egreso para SQS, ECR, CloudWatch.
-resource "aws_security_group" "ecs_workers" {
-  name        = "${var.name_prefix}-sg-ecs-workers"
-  description = "Workers y cron tasks: sin ingress, solo egreso"
-  vpc_id      = var.vpc_id
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  lifecycle { create_before_destroy = true }
-}
-
-
-# --- Regla en el SG de RDS existente ----------------------------------------
-# Permite que las tasks ECS accedan a la RDS ya creada.
-# Se agrega como regla al SG existente pasado como variable.
-resource "aws_security_group_rule" "rds_from_ecs_api" {
-  type                     = "ingress"
-  from_port                = 5432 
-  to_port                  = 5432
-  protocol                 = "tcp"
-  security_group_id        = var.rds_security_group_id
-  source_security_group_id = aws_security_group.ecs_api.id
-  description              = "mango-api tasks → RDS"
-}
-
-resource "aws_security_group_rule" "rds_from_ecs_admin" {
-  type                     = "ingress"
-  from_port                = 5432
-  to_port                  = 5432
-  protocol                 = "tcp"
-  security_group_id        = var.rds_security_group_id
-  source_security_group_id = aws_security_group.ecs_admin.id
-  description              = "mango-admin tasks → RDS"
-}
-
-resource "aws_security_group_rule" "rds_from_ecs_workers" {
-  type                     = "ingress"
-  from_port                = 5432
-  to_port                  = 5432
-  protocol                 = "tcp"
-  security_group_id        = var.rds_security_group_id
-  source_security_group_id = aws_security_group.ecs_workers.id
-  description              = "Workers y cron → RDS"
-}

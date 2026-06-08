@@ -2,17 +2,20 @@
 variable "name_prefix"{
   type = string 
 }
+variable "vpc_id"{
+    type = string 
+}
+variable "rds_security_group_id"{
+    type = string 
+}
 variable "private_subnet_ids"{
   type = list(string) 
 }
-variable "ecs_api_sg_id"{
+variable "vpc_id"{
   type = string 
 }
-variable "ecs_admin_sg_id"{
+variable "rds_security_group_id" {
   type = string 
-}
-variable "ecs_workers_sg_id"{
-  type = string
 }
 variable "ecr_api_url"{
   type = string 
