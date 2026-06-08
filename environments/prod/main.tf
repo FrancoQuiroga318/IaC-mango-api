@@ -26,18 +26,6 @@ module "vpc" {
   tags                 = local.tags
 }
 
-# --- Security Groups --------------------------------------------------------
-module "sg" {
-  source = "../../modules/sg"
-
-  name_prefix           = local.name_prefix
-  vpc_id                = module.vpc.vpc_id
-  rds_security_group_id = var.rds_security_group_id
-  api_container_port    = var.api_container_port
-  admin_container_port  = var.admin_container_port
-  tags                  = local.tags
-}
-
 # --- ECR --------------------------------------------------------------------
 module "ecr" {
   source      = "../../modules/ecr"

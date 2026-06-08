@@ -95,3 +95,24 @@ variable "admin_secrets" {
   type    = list(object({ name = string, valueFrom = string }))
   default = []
 }
+
+## RDS 
+variable "rds_security_group_id" {
+  description = "SG ID de la RDS existente. Terraform agrega reglas de ingress desde ECS."
+  type        = string
+}
+
+## Var Task
+variable "task_definitions" {
+  type = map(object({
+    cpu               = number
+    memory            = number
+    ecr_url           = string
+    port              = optional(number, null)
+    health_check_path = optional(string, "/health")
+    command           = optional(list(string), null)
+    sqs_queue_url     = optional(string, null)
+    environment_vars  = optional(list(object({ name = string, value = string })), [])
+    secrets           = optional(list(object({ name = string, valueFrom = string })), [])
+  }))
+}
