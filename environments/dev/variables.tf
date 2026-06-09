@@ -22,6 +22,7 @@ variable "rds_security_group_id" {
   type        = string
 }
 
+
 # --- ACM --------------------------------------------------------------------
 variable "acm_certificate_arn" {
   description = "ARN del certificado ACM existente (wildcard o multi-dominio)."
@@ -94,4 +95,10 @@ variable "admin_environment_vars" {
 variable "admin_secrets" {
   type    = list(object({ name = string, valueFrom = string }))
   default = []
+}
+
+## RDS
+variable "rds_security_group_id" {
+  description = "SG ID de la RDS existente. Terraform agrega reglas de ingress desde ECS."
+  type        = string
 }
