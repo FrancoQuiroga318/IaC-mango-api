@@ -3,19 +3,13 @@ variable "name_prefix"{
   type = string 
 }
 variable "vpc_id"{
-    type = string 
+  type = string 
 }
 variable "rds_security_group_id"{
-    type = string 
+  type = string 
 }
 variable "private_subnet_ids"{
   type = list(string) 
-}
-variable "vpc_id"{
-  type = string 
-}
-variable "rds_security_group_id" {
-  type = string 
 }
 variable "ecr_api_url"{
   type = string 
@@ -52,6 +46,11 @@ variable "task_definitions" {
     environment_vars = optional(list(object({ name = string, value = string })), [])
     secrets          = optional(list(object({ name = string, valueFrom = string })), [])
   }))
+}
+
+#alb sg
+variable "alb_sg_id" {
+  type = string 
 }
 
 # Puertos

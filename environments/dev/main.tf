@@ -67,10 +67,10 @@ module "ecs" {
   source = "../../modules/ecs"
 
   name_prefix            = local.name_prefix
-  private_subnet_ids     = module.vpc.private_subnet_ids
-  ecs_api_sg_id          = module.sg.ecs_api_sg_id
-  ecs_admin_sg_id        = module.sg.ecs_admin_sg_id
-  ecs_workers_sg_id      = module.sg.ecs_workers_sg_id
+  vpc_id                = module.vpc.vpc_id
+  rds_security_group_id = var.rds_security_group_id
+  private_subnet_ids    = module.vpc.private_subnet_ids
+  task_definitions      = var.task_definitions
   ecr_api_url            = module.ecr.api_repository_url
   ecr_admin_url          = module.ecr.admin_repository_url
   api_target_group_arn   = module.alb.api_target_group_arn

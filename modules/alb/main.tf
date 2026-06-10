@@ -34,7 +34,7 @@ resource "aws_security_group" "alb" {
 
   # HTTP → redirigir a HTTPS (listener de redirección)
   ingress {
-    description = "HTTP (redirección a HTTPS)"
+    description = "HTTP redireccionamiento a HTTPS"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"

@@ -16,6 +16,20 @@ variable "private_subnet_cidrs" {
   default = ["10.0.11.0/24", "10.0.12.0/24"]
 }
 
+# TASK DEFINITIONS
+variable "task_definitions" {
+  type = map(object({
+    cpu               = number
+    memory            = number
+    ecr_url           = string
+    port              = optional(number, null)
+    health_check_path = optional(string, "/health")
+    command           = optional(list(string), null)
+    sqs_queue_url     = optional(string, null)
+    environment_vars  = optional(list(object({ name = string, value = string })), [])
+    secrets           = optional(list(object({ name = string, valueFrom = string })), [])
+  }))
+}
 # --- RDS existente ----------------------------------------------------------
 variable "rds_security_group_id" {
   description = "SG ID de la RDS existente. Terraform agrega reglas de ingress desde ECS."

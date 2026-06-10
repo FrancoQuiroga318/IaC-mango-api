@@ -33,14 +33,6 @@ module "ecr" {
   tags        = local.tags
 }
 
-# --- SQS --------------------------------------------------------------------
-module "sqs" {
-  source        = "../../modules/sqs"
-  name_prefix   = local.name_prefix
-  create_queues = var.create_sqs_queues
-  tags          = local.tags
-}
-
 # --- ALB --------------------------------------------------------------------
 module "alb" {
   source = "../../modules/alb"
@@ -48,7 +40,7 @@ module "alb" {
   name_prefix                = local.name_prefix
   vpc_id                     = module.vpc.vpc_id
   public_subnet_ids          = module.vpc.public_subnet_ids
-  alb_sg_id                  = module.sg.alb_sg_id
+  alb_sg_id                  = module.alb.alb_sg_id
   acm_certificate_arn        = var.acm_certificate_arn
   api_domain                 = var.api_domain
   admin_domain               = var.admin_domain
@@ -66,17 +58,18 @@ module "ecs" {
   source = "../../modules/ecs"
 
   name_prefix            = local.name_prefix
-  private_subnet_ids     = module.vpc.private_subnet_ids
-  ecs_api_sg_id          = module.sg.ecs_api_sg_id
-  ecs_admin_sg_id        = module.sg.ecs_admin_sg_id
-  ecs_workers_sg_id      = module.sg.ecs_workers_sg_id
+  vpc_id                = module.vpc.vpc_id
+  rds_security_group_id = var.rds_security_group_id
+  private_subnet_ids    = module.vpc.private_subnet_ids
+  task_definitions      = var.task_definitions
   ecr_api_url            = module.ecr.api_repository_url
   ecr_admin_url          = module.ecr.admin_repository_url
   api_target_group_arn   = module.alb.api_target_group_arn
   admin_target_group_arn = module.alb.admin_target_group_arn
   image_tag              = var.image_tag
   log_retention_days     = 90
-
+  alb_sg_id = module.alb.alb_sg_id
+  
   # Sizing PROD
   api_cpu     = 512
   api_memory  = 1024
@@ -97,8 +90,8 @@ module "ecs" {
   api_max_count      = 4
 
   # SQS
-  api_queue_url   = module.sqs.api_queue_url
-  admin_queue_url = module.sqs.admin_queue_url
+  api_queue_url   = ""
+  admin_queue_url = ""
 
   api_container_port    = var.api_container_port
   admin_container_port  = var.admin_container_port

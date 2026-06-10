@@ -23,7 +23,7 @@ resource "aws_security_group" "ecs_api" {
     from_port       = var.api_container_port
     to_port         = var.api_container_port
     protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
+    security_groups = [var.alb_sg_id]
   }
 
   egress {
@@ -50,7 +50,7 @@ resource "aws_security_group" "ecs_admin" {
     from_port       = var.admin_container_port
     to_port         = var.admin_container_port
     protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
+    security_groups = [var.alb_sg_id]
   }
 
   egress {
@@ -111,7 +111,7 @@ resource "aws_security_group_rule" "rds_from_ecs_workers" {
   protocol                 = "tcp"
   security_group_id        = var.rds_security_group_id
   source_security_group_id = aws_security_group.ecs_workers.id
-  description              = "Workers y cron → RDS"
+  description              = "Workers y cron - RDS"
 }
 
 # =============================================================================
@@ -218,7 +218,7 @@ resource "aws_iam_role_policy" "eventbridge_cron" {
       {
         Effect   = "Allow"
         Action   = "ecs:RunTask"
-        Resource = aws_ecs_task_definition.cron.arn
+        Resource = aws_ecs_task_definition.tasks["mango-cron"].arn
       },
       {
         Effect   = "Allow"
@@ -515,7 +515,7 @@ resource "aws_scheduler_schedule" "cron" {
 
       network_configuration {
         assign_public_ip = false
-        security_groups  = [vaws_security_group.ecs_api.id]
+        security_groups  = [aws_security_group.ecs_api.id]
         subnets          = var.private_subnet_ids
       }
     }

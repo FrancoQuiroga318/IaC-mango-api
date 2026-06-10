@@ -96,11 +96,6 @@ variable "admin_secrets" {
   default = []
 }
 
-## RDS 
-variable "rds_security_group_id" {
-  description = "SG ID de la RDS existente. Terraform agrega reglas de ingress desde ECS."
-  type        = string
-}
 
 ## Var Task
 variable "task_definitions" {
