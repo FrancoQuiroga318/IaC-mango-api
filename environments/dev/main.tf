@@ -43,7 +43,6 @@ module "alb" {
   name_prefix                = local.name_prefix
   vpc_id                     = module.vpc.vpc_id
   public_subnet_ids          = module.vpc.public_subnet_ids
-  alb_sg_id                  = module.sg.alb_sg_id
   acm_certificate_arn        = var.acm_certificate_arn
   api_domain                 = var.api_domain
   admin_domain               = var.admin_domain
