@@ -29,13 +29,6 @@ output "ecs_cluster_name" {
   value = module.ecs.cluster_name
 }
 
-output "api_sqs_queue_url" {
-  value = module.sqs.api_queue_url
-}
-
-output "admin_sqs_queue_url" {
-  value = module.sqs.admin_queue_url
-}
 
 output "eventbridge_scheduler" {
   description = "Nombre del scheduler de EventBridge que dispara el cron de Laravel"

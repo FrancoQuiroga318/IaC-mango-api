@@ -30,12 +30,6 @@ variable "task_definitions" {
     secrets           = optional(list(object({ name = string, valueFrom = string })), [])
   }))
 }
-# --- RDS existente ----------------------------------------------------------
-variable "rds_security_group_id" {
-  description = "SG ID de la RDS existente. Terraform agrega reglas de ingress desde ECS."
-  type        = string
-}
-
 
 # --- ACM --------------------------------------------------------------------
 variable "acm_certificate_arn" {

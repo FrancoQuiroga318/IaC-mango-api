@@ -37,13 +37,6 @@ module "ecr" {
   tags        = local.tags
 }
 
-module "sqs" {
-  source        = "../../modules/sqs"
-  name_prefix   = local.name_prefix
-  create_queues = var.create_sqs_queues
-  tags          = local.tags
-}
-
 module "alb" {
   source = "../../modules/alb"
 
@@ -71,6 +64,7 @@ module "ecs" {
   rds_security_group_id = var.rds_security_group_id
   private_subnet_ids    = module.vpc.private_subnet_ids
   task_definitions      = var.task_definitions
+  alb_sg_id             = module.alb.alb_sg_id
   ecr_api_url            = module.ecr.api_repository_url
   ecr_admin_url          = module.ecr.admin_repository_url
   api_target_group_arn   = module.alb.api_target_group_arn
@@ -96,8 +90,8 @@ module "ecs" {
   enable_autoscaling = false
 
   # SQS
-  api_queue_url   = module.sqs.api_queue_url
-  admin_queue_url = module.sqs.admin_queue_url
+  api_queue_url   = ""
+  admin_queue_url = ""
 
   api_container_port      = var.api_container_port
   admin_container_port    = var.admin_container_port
