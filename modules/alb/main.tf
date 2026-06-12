@@ -10,7 +10,7 @@ resource "aws_lb" "main" {
   name               = "${var.name_prefix}-alb"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [var.alb_sg_id]
+  security_groups    = [aws_security_group.alb.id]
   subnets            = var.public_subnet_ids
   enable_http2       = true
 
