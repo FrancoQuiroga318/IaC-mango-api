@@ -71,6 +71,21 @@ module "ecs" {
   image_tag              = var.image_tag
   log_retention_days     = 14
 
+  security_groups = {
+  "ecs-api" = {
+    description  = "mango-api tasks: solo trafico desde ALB"
+    ingress_port = 80
+  }
+  "ecs-admin" = {
+    description  = "mango-admin tasks: solo trafico desde ALB"
+    ingress_port = 80
+  }
+  "ecs-workers" = {
+    description  = "Workers y cron: sin ingress"
+    ingress_port = null
+  }
+}
+
   # Sizing DEV (menor que PROD)
   api_cpu      = 256
   api_memory   = 512

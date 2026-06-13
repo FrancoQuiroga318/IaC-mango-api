@@ -1,124 +1,47 @@
 # =============================================================================
 # modules/ecs/main.tf
-# ECS Cluster + 5 Task Definitions:
-#   1. mango-api         → Service con ALB, auto-scaling por CPU (solo PROD)
-#   2. mango-admin       → Service con ALB, 1 tarea fija, sin auto-scaling
-#   3. mango-api-worker  → Service sin ALB, 1 tarea fija, consume SQS
-#   4. mango-admin-worker→ Service sin ALB, 1 tarea fija, consume SQS
-#   5. cron-task         → Solo Task Definition, disparada por EventBridge
 # =============================================================================
+
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
-## 
-# SG de mango-api tasks
-# Solo acepta tráfico del ALB en el puerto del contenedor
-resource "aws_security_group" "ecs_api" {
-  name        = "${var.name_prefix}-sg-ecs-api"
-  description = "mango-api Fargate tasks: solo tráfico desde ALB"
-  vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "Desde ALB"
-    from_port       = var.api_container_port
-    to_port         = var.api_container_port
-    protocol        = "tcp"
-    security_groups = [var.alb_sg_id]
-  }
-
-  egress {
-    description = "Salida irrestricta (ECR, SQS, CloudWatch, RDS)"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  lifecycle { create_before_destroy = true }
-}
-
-# --- SG de mango-admin tasks ------------------------------------------------
-# Si admin_allowed_cidrs está vacío → acepta del ALB sin filtro extra.
-# Si tiene IPs → el ALB ya filtra en su propio SG.
-resource "aws_security_group" "ecs_admin" {
-  name        = "${var.name_prefix}-sg-ecs-admin"
-  description = "mango-admin Fargate tasks: solo tráfico desde ALB"
-  vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "Desde ALB"
-    from_port       = var.admin_container_port
-    to_port         = var.admin_container_port
-    protocol        = "tcp"
-    security_groups = [var.alb_sg_id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  lifecycle { create_before_destroy = true }
-}
-
-# --- SG de Workers (api-worker, admin-worker, cron) -------------------------
-# Sin ingress (no exponen puertos). Solo egreso para SQS, ECR, CloudWatch.
-resource "aws_security_group" "ecs_workers" {
-  name        = "${var.name_prefix}-sg-ecs-workers"
-  description = "Workers y cron tasks: sin ingress, solo egreso"
-  vpc_id      = var.vpc_id
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  lifecycle { create_before_destroy = true }
-}
-
-
-# --- Regla en el SG de RDS existente ----------------------------------------
-# Permite que las tasks ECS accedan a la RDS ya creada.
-# Se agrega como regla al SG existente pasado como variable.
-resource "aws_security_group_rule" "rds_from_ecs_api" {
-  type                     = "ingress"
-  from_port                = 5432 
-  to_port                  = 5432
-  protocol                 = "tcp"
-  security_group_id        = var.rds_security_group_id
-  source_security_group_id = aws_security_group.ecs_api.id
-  description              = "mango-api tasks → RDS"
-}
-
-resource "aws_security_group_rule" "rds_from_ecs_admin" {
-  type                     = "ingress"
-  from_port                = 5432
-  to_port                  = 5432
-  protocol                 = "tcp"
-  security_group_id        = var.rds_security_group_id
-  source_security_group_id = aws_security_group.ecs_admin.id
-  description              = "mango-admin tasks → RDS"
-}
-
-resource "aws_security_group_rule" "rds_from_ecs_workers" {
-  type                     = "ingress"
-  from_port                = 5432
-  to_port                  = 5432
-  protocol                 = "tcp"
-  security_group_id        = var.rds_security_group_id
-  source_security_group_id = aws_security_group.ecs_workers.id
-  description              = "Workers y cron - RDS"
-}
-
 # =============================================================================
-# IAM — Roles con mínimo privilegio
+# Security Groups
 # =============================================================================
 
-# Execution Role: ECS usa este role para arrancar el contenedor (pull ECR, logs)
+resource "aws_security_group" "ecs" {
+  for_each = var.security_groups
+
+  name        = "${var.name_prefix}-sg-${each.key}"
+  description = each.value.description
+  vpc_id      = var.vpc_id
+
+  dynamic "ingress" {
+    for_each = each.value.ingress_port != null ? [1] : []
+    content {
+      description     = "Desde ALB"
+      from_port       = each.value.ingress_port
+      to_port         = each.value.ingress_port
+      protocol        = "tcp"
+      security_groups = [var.alb_sg_id]
+    }
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  lifecycle { create_before_destroy = true }
+}
+
+
+# =============================================================================
+# IAM
+# =============================================================================
+
 resource "aws_iam_role" "execution" {
   name = "${var.name_prefix}-ecs-execution-role"
 
@@ -130,7 +53,6 @@ resource "aws_iam_role" "execution" {
       Action    = "sts:AssumeRole"
     }]
   })
-
 }
 
 resource "aws_iam_role_policy_attachment" "execution_managed" {
@@ -138,7 +60,6 @@ resource "aws_iam_role_policy_attachment" "execution_managed" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# Task Role: la APLICACIÓN usa este role en tiempo de ejecución (SQS, S3, etc.)
 resource "aws_iam_role" "task" {
   name = "${var.name_prefix}-ecs-task-role"
 
@@ -150,7 +71,6 @@ resource "aws_iam_role" "task" {
       Action    = "sts:AssumeRole"
     }]
   })
-
 }
 
 resource "aws_iam_role_policy" "task_policy" {
@@ -184,70 +104,60 @@ resource "aws_iam_role_policy" "task_policy" {
         Resource = "*"
       },
       {
-        Sid    = "CloudWatchMetrics"
-        Effect = "Allow"
-        Action = ["cloudwatch:PutMetricData"]
+        Sid      = "CloudWatchMetrics"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
         Resource = "*"
       }
     ]
   })
 }
 
-# EventBridge Role: para disparar la cron task
-resource "aws_iam_role" "eventbridge_cron" {
-  name = "${var.name_prefix}-eventbridge-cron-role"
+# resource "aws_iam_role" "eventbridge_cron" {
+#   name = "${var.name_prefix}-eventbridge-cron-role"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "scheduler.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
+#   assume_role_policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [{
+#       Effect    = "Allow"
+#       Principal = { Service = "scheduler.amazonaws.com" }
+#       Action    = "sts:AssumeRole"
+#     }]
+#   })
+# }
 
-}
+# resource "aws_iam_role_policy" "eventbridge_cron" {
+#   name = "${var.name_prefix}-eventbridge-cron-policy"
+#   role = aws_iam_role.eventbridge_cron.id
 
-resource "aws_iam_role_policy" "eventbridge_cron" {
-  name = "${var.name_prefix}-eventbridge-cron-policy"
-  role = aws_iam_role.eventbridge_cron.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = "ecs:RunTask"
-        Resource = aws_ecs_task_definition.tasks["mango-cron"].arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = "iam:PassRole"
-        Resource = [
-          aws_iam_role.execution.arn,
-          aws_iam_role.task.arn
-        ]
-      }
-    ]
-  })
-}
+#   policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [
+#       {
+#         Effect   = "Allow"
+#         Action   = "ecs:RunTask"
+#         Resource = aws_ecs_task_definition.tasks["mango-cron"].arn
+#       },
+#       {
+#         Effect   = "Allow"
+#         Action   = "iam:PassRole"
+#         Resource = [
+#           aws_iam_role.execution.arn,
+#           aws_iam_role.task.arn
+#         ]
+#       }
+#     ]
+#   })
+# }
 
 # =============================================================================
 # CloudWatch Log Groups
 # =============================================================================
 
 resource "aws_cloudwatch_log_group" "services" {
-  for_each = toset([
-    "mango-api",
-    "mango-admin",
-    "mango-api-worker",
-    "mango-admin-worker",
-    "mango-cron"
-  ])
-
+  for_each          = var.task_definitions
   name              = "/ecs/${var.name_prefix}/${each.key}"
   retention_in_days = var.log_retention_days
-
 }
 
 # =============================================================================
@@ -261,7 +171,6 @@ resource "aws_ecs_cluster" "main" {
     name  = "containerInsights"
     value = "enabled"
   }
-
 }
 
 resource "aws_ecs_cluster_capacity_providers" "main" {
@@ -275,7 +184,10 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
   }
 }
 
-# Task Automatizadas
+# =============================================================================
+# Task Definitions — for_each sobre var.task_definitions
+# Para agregar una nueva task: solo agregar una entrada en tfvars
+# =============================================================================
 
 resource "aws_ecs_task_definition" "tasks" {
   for_each = var.task_definitions
@@ -299,12 +211,12 @@ resource "aws_ecs_task_definition" "tasks" {
       protocol      = "tcp"
     }] : []
 
-    environment = concat(
-      each.value.environment_vars,
-      each.value.sqs_queue_url != null ? [{ name = "SQS_QUEUE", value = each.value.sqs_queue_url }] : []
-    )
+    # environment = concat(
+    #   each.value.environment_vars,
+    #   each.value.sqs_queue_url != null ? [{ name = "SQS_QUEUE", value = each.value.sqs_queue_url }] : []
+    # )
 
-    secrets = each.value.secrets
+    # secrets = each.value.secrets
 
     logConfiguration = {
       logDriver = "awslogs"
@@ -324,11 +236,11 @@ resource "aws_ecs_task_definition" "tasks" {
     } : null
   }])
 }
+
 # =============================================================================
 # ECS Services
 # =============================================================================
 
-# --- Service: mango-api -----------------------------------------------------
 resource "aws_ecs_service" "api" {
   name                              = "${var.name_prefix}-mango-api"
   cluster                           = aws_ecs_cluster.main.id
@@ -341,7 +253,7 @@ resource "aws_ecs_service" "api" {
   enable_execute_command            = true
 
   network_configuration {
-    security_groups  = [aws_security_group.ecs_api.id]
+    security_groups  = [aws_security_group.ecs["ecs-api"].id]
     subnets          = var.private_subnet_ids
     assign_public_ip = false
   }
@@ -365,11 +277,10 @@ resource "aws_ecs_service" "api" {
   }
 }
 
-# --- Service: mango-admin ---------------------------------------------------
 resource "aws_ecs_service" "admin" {
   name                              = "${var.name_prefix}-mango-admin"
   cluster                           = aws_ecs_cluster.main.id
-  task_definition                   = aws_ecs_task_definition.admin.arn
+  task_definition                   = aws_ecs_task_definition.tasks["mango-admin"].arn
   desired_count                     = var.admin_desired_count
   launch_type                       = "FARGATE"
   platform_version                  = "LATEST"
@@ -378,7 +289,7 @@ resource "aws_ecs_service" "admin" {
   enable_execute_command            = true
 
   network_configuration {
-    security_groups  = [aws_security_group.ecs_api.id]
+    security_groups  = [aws_security_group.ecs["ecs-admin"].id]
     subnets          = var.private_subnet_ids
     assign_public_ip = false
   }
@@ -402,19 +313,18 @@ resource "aws_ecs_service" "admin" {
   }
 }
 
-# --- Service: mango-api-worker ----------------------------------------------
 resource "aws_ecs_service" "api_worker" {
-  name                 = "${var.name_prefix}-mango-api-worker"
-  cluster              = aws_ecs_cluster.main.id
-  task_definition      = aws_ecs_task_definition.api_worker.arn
-  desired_count        = 1
-  launch_type          = "FARGATE"
-  platform_version     = "LATEST"
-  force_new_deployment = true
+  name                   = "${var.name_prefix}-mango-api-worker"
+  cluster                = aws_ecs_cluster.main.id
+  task_definition        = aws_ecs_task_definition.tasks["mango-api-worker"].arn
+  desired_count          = 1
+  launch_type            = "FARGATE"
+  platform_version       = "LATEST"
+  force_new_deployment   = true
   enable_execute_command = true
 
   network_configuration {
-    security_groups  = [aws_security_group.ecs_api.id]
+    security_groups  = [aws_security_group.ecs["ecs-workers"].id]
     subnets          = var.private_subnet_ids
     assign_public_ip = false
   }
@@ -429,19 +339,18 @@ resource "aws_ecs_service" "api_worker" {
   }
 }
 
-# --- Service: mango-admin-worker --------------------------------------------
 resource "aws_ecs_service" "admin_worker" {
-  name                 = "${var.name_prefix}-mango-admin-worker"
-  cluster              = aws_ecs_cluster.main.id
-  task_definition      = aws_ecs_task_definition.admin_worker.arn
-  desired_count        = 1
-  launch_type          = "FARGATE"
-  platform_version     = "LATEST"
-  force_new_deployment = true
+  name                   = "${var.name_prefix}-mango-admin-worker"
+  cluster                = aws_ecs_cluster.main.id
+  task_definition        = aws_ecs_task_definition.tasks["mango-admin-worker"].arn
+  desired_count          = 1
+  launch_type            = "FARGATE"
+  platform_version       = "LATEST"
+  force_new_deployment   = true
   enable_execute_command = true
 
   network_configuration {
-    security_groups  = [aws_security_group.ecs_api.id]
+    security_groups  = [aws_security_group.ecs["ecs-workers"].id]
     subnets          = var.private_subnet_ids
     assign_public_ip = false
   }
@@ -450,14 +359,14 @@ resource "aws_ecs_service" "admin_worker" {
     enable   = true
     rollback = true
   }
-  
+
   lifecycle {
     ignore_changes = [task_definition]
   }
 }
 
 # =============================================================================
-# Auto-Scaling — Solo mango-api, solo en PROD (controlado por variable)
+# Auto-Scaling — Solo mango-api en PROD
 # =============================================================================
 
 resource "aws_appautoscaling_target" "api" {
@@ -493,39 +402,34 @@ resource "aws_appautoscaling_policy" "api_cpu" {
 # EventBridge Scheduler — Cron task cada minuto
 # =============================================================================
 
-resource "aws_scheduler_schedule" "cron" {
-  name       = "${var.name_prefix}-laravel-scheduler"
-  group_name = "default"
+# resource "aws_scheduler_schedule" "cron" {
+#   name                = "${var.name_prefix}-laravel-scheduler"
+#   group_name          = "default"
+#   schedule_expression = "rate(1 minute)"
 
-  # Ejecuta cada minuto (equivale al cron de Linux: * * * * *)
-  schedule_expression = "rate(1 minute)"
+#   flexible_time_window {
+#     mode = "OFF"
+#   }
 
-  flexible_time_window {
-    mode = "OFF"
-  }
+#   target {
+#     arn      = aws_ecs_cluster.main.arn
+#     role_arn = aws_iam_role.eventbridge_cron.arn
 
-  target {
-    arn      = aws_ecs_cluster.main.arn
-    role_arn = aws_iam_role.eventbridge_cron.arn
+#     ecs_parameters {
+#       task_definition_arn = aws_ecs_task_definition.tasks["mango-cron"].arn
+#       launch_type         = "FARGATE"
+#       task_count          = 1
 
-    ecs_parameters {
-      task_definition_arn = aws_ecs_task_definition.cron.arn
-      launch_type         = "FARGATE"
-      task_count          = 1
+#       network_configuration {
+#         assign_public_ip = false
+#         security_groups  = [aws_security_group.ecs["ecs-workers"].id]
+#         subnets          = var.private_subnet_ids
+#       }
+#     }
 
-      network_configuration {
-        assign_public_ip = false
-        security_groups  = [aws_security_group.ecs_api.id]
-        subnets          = var.private_subnet_ids
-      }
-    }
-
-    # Descartar si la tarea anterior aún no termina (evita acumulación)
-    retry_policy {
-      maximum_retry_attempts       = 0
-      maximum_event_age_in_seconds = 60
-    }
-  }
-
-}
-
+#     retry_policy {
+#       maximum_retry_attempts       = 0
+#       maximum_event_age_in_seconds = 60
+#     }
+#   }
+# }

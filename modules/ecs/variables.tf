@@ -48,6 +48,14 @@ variable "task_definitions" {
   }))
 }
 
+#variables security groups 
+variable "security_groups" {
+  type = map(object({
+    description  = string
+    ingress_port = optional(number, null)
+  }))
+}
+
 #alb sg
 variable "alb_sg_id" {
   type = string 
